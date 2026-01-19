@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token dApp</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+</head>
+<body>
+<h1>Token dApp</h1>
+<button id="connectButton">Connect Wallet</button>
+<p id="accountAddress">Account: Not connected</p>
+<p id="balance">Balance: Loading...</p>
+
+<input id="transferTo" type="text" placeholder="Recipient Address">
+<input id="transferAmount" type="number" placeholder="Amount">
+<button id="transferButton" disabled>Transfer</button>
+
+
+<p id="errorMessage" style="color: red;"></p>
+<ul id="transferEvents"></ul>
+
+<script src="app.js"></script>
+</body>
+</html>
