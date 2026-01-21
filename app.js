@@ -1,4 +1,4 @@
-const CONTRACT_ADDRESS = '0xb5465ED8EcD4F79dD4BE10A7C8e7a50664e5eeEB'; // ← замени на свой
+const CONTRACT_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3'; // ← замени на свой
 const ABI = [
     {
         "inputs": [
@@ -314,7 +314,7 @@ const ABI = [
         "type": "function"
     }
 ];
-alert(CONTRACT_ADDRESS)
+alert("v5")
 let provider;
 let signer;
 let contract;
@@ -329,108 +329,137 @@ const transferAmount = document.getElementById('transferAmount');
 const errorMessage = document.getElementById('errorMessage');
 const transferEvents = document.getElementById('transferEvents');
 
-// Функция обновления баланса
-async function updateBalance() {
+// Обновление баланса + информации о токене
+async function updateBalanceAndInfo() {
     if (!contract || !account) return;
     try {
-        const bal = await contract.balanceOf(account);
-        balanceElem.textContent = `Balance: ${ethers.utils.formatUnits(bal, 18)} tokens`;
+        const [bal, name, symbol, dec] = await Promise.all([
+            contract.balanceOf(account),
+            contract.name(),
+            contract.symbol(),
+            contract.decimals()
+        ]);
+        const formatted = ethers.utils.formatUnits(bal, dec);
+        balanceElem.textContent = `Balance: ${formatted} ${symbol} (${name})`;
     } catch (err) {
-        console.error("Ошибка при обновлении баланса:", err);
+        console.error("Ошибка при обновлении баланса/инфо:", err);
         balanceElem.textContent = "Ошибка загрузки баланса";
     }
 }
 
-// Функция подключения и инициализации
+// Подключение кошелька + загрузка истории + подписка на события
 async function connectWallet(askPermission = false) {
     try {
         if (!window.ethereum) {
-            console.log('MetaMask не обнаружен');
             throw new Error('MetaMask не установлен');
         }
 
-        console.log('MetaMask обнаружен, создаём провайдер...');
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
 
         let accounts;
-
         if (askPermission) {
-            console.log('Запрашиваем разрешение на аккаунты...');
             accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
         } else {
-            console.log('Проверяем существующие аккаунты...');
             accounts = await window.ethereum.request({ method: 'eth_accounts' });
         }
-
-        console.log('Полученные аккаунты:', accounts);
 
         if (accounts && accounts.length > 0) {
             account = accounts[0];
             accountAddress.textContent = `Account: ${account}`;
-            console.log('Аккаунт получен:', account);
 
             contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-            console.log('Контракт инициализирован');
 
-            await updateBalance();
+            await updateBalanceAndInfo();
             transferButton.disabled = false;
+            errorMessage.textContent = '';
 
-            // Подписываемся на события Transfer
-            contract.on('Transfer', (from, to, value) => {
+            // ────────────────────────────────────────────────
+            // 1. Загружаем историю всех Transfer событий
+            // ────────────────────────────────────────────────
+            transferEvents.innerHTML = ''; // очищаем список перед загрузкой
+
+            // 1. Загружаем историю событий Transfer (все прошлые, кроме возможно самого свежего)
+            try {
+                const currentBlock = await provider.getBlockNumber();
+                const fromBlock = 0;                    // или можно с какого-то более позднего блока, если знаешь
+                const toBlock   = currentBlock - 1;     // ← ключевой момент: до предыдущего блока
+
+                const pastTransfers = await contract.queryFilter(
+                    contract.filters.Transfer(null, null),
+                    fromBlock,
+                    toBlock                                 // не включаем текущий блок
+                );
+
+                // Добавляем в обратном порядке (старые сверху)
+                pastTransfers.reverse().forEach(event => {
+                    const { from, to, value } = event.args;
+                    const li = document.createElement('li');
+                    li.textContent = `Transfer: ${from.slice(0,6)}... → ${to.slice(0,6)}... : ${ethers.utils.formatUnits(value, 18)} tokens`;
+                    transferEvents.appendChild(li);
+                });
+
+                console.log(`Загружено прошлых трансферов: ${pastTransfers.length} (до блока ${toBlock})`);
+
+                // Дополнительно: если есть события в текущем блоке — они придут через подписку
+            } catch (err) {
+                console.error("Ошибка загрузки истории событий:", err);
+            }
+
+// 2. Подписка на новые события (остаётся как было)
+            contract.on('Transfer', (from, to, value, event) => {
                 const li = document.createElement('li');
                 li.textContent = `Transfer: ${from.slice(0,6)}... → ${to.slice(0,6)}... : ${ethers.utils.formatUnits(value, 18)} tokens`;
                 transferEvents.prepend(li);
+
                 if (from === account || to === account) {
                     updateBalance();
                 }
             });
 
-            errorMessage.textContent = '';
         } else {
-            console.log('Нет доступных аккаунтов');
             connectButton.textContent = 'Connect Wallet';
             transferButton.disabled = true;
         }
     } catch (err) {
         errorMessage.textContent = `Ошибка: ${err.message}`;
-        console.error('Ошибка в connectWallet:', err);
+        console.error('Ошибка подключения:', err);
     }
 }
 
-// Кнопка Connect Wallet
+// Кнопка подключения
 connectButton.addEventListener('click', () => {
-    connectWallet(true); // с запросом разрешения
+    connectWallet(true);
 });
 
-// Автоматическое подключение при загрузке страницы
+// Автоподключение при загрузке
 window.addEventListener('load', () => {
-    connectWallet(false); // без запроса, проверяем только существующий доступ
+    connectWallet(false);
 });
 
-// Обработка смены аккаунта и сети
+// Обработка смены аккаунта / сети
 if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
         if (accounts.length === 0) {
-            // Пользователь отключил кошелёк
             account = null;
             accountAddress.textContent = 'Account: Not connected';
             balanceElem.textContent = 'Balance: Not connected';
             transferButton.disabled = true;
             connectButton.textContent = 'Connect Wallet';
+            transferEvents.innerHTML = '';
         } else {
             account = accounts[0];
             accountAddress.textContent = `Account: ${account}`;
-            updateBalance();
+            connectWallet(false); // переподключаемся
         }
     });
 
     window.ethereum.on('chainChanged', () => {
-        location.reload(); // проще всего — перезагрузка при смене сети
+        location.reload();
     });
 }
 
-// Кнопка Transfer
+// Кнопка перевода
 transferButton.addEventListener('click', async () => {
     if (!account || !contract) {
         errorMessage.textContent = 'Сначала подключите кошелёк';
@@ -452,10 +481,11 @@ transferButton.addEventListener('click', async () => {
 
         await tx.wait();
         errorMessage.textContent = 'Перевод успешен!';
-        updateBalance();
 
+        updateBalanceAndInfo();
         transferTo.value = '';
         transferAmount.value = '';
+
     } catch (err) {
         errorMessage.textContent = `Ошибка: ${err.message || err.reason || 'Неизвестная ошибка'}`;
         console.error(err);
